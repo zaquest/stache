@@ -2,11 +2,15 @@
 
 Escaped value
 
-> {{value.path}}
+```
+{{value.path}}
+```
 
 Unescaped value
 
-> {{{value.path}}}
+```
+{{{value.path}}}
+```
 
 `if-else` expressions
 
@@ -41,3 +45,9 @@ Note:
     you can't access `key1` from here.
   {{\each}}
   ```
+
+## Usage
+
+````
+stachec path/to/template > template.js
+```
