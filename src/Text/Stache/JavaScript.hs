@@ -1,15 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Main where
+module Text.Stache.JavaScript (compile) where
 
-import System.Environment (getArgs)
 import Data.Monoid
 import Data.Char (isControl)
-import qualified Data.List as List
 import Data.Foldable (foldl1)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import Control.Monad.State.Strict (State)
 import qualified Control.Monad.State.Strict as St
 import Control.Monad.Writer.Strict (WriterT)
@@ -19,7 +16,7 @@ import Data.Sequence (Seq, ViewL(..), (<|), (|>))
 import qualified Data.Sequence as Seq
 import Text.Stache.Types
 import Text.Stache.Scan (scan)
-import Text.Stache.Parse (parse, Template(..))
+import Text.Stache.Parse (Template(..))
 
 type Var = Text -- variable name
 type Value = Text -- RHS of an assignment
@@ -34,7 +31,6 @@ define val = Fn $ do
   (defs, fn) <- unFn $ finishFn val
   n <- St.state $ \n -> (n, n+1)
   let v = var n
-  St.put (n + 1)
   Wr.tell (defs |> (v, fn), mempty)
   pure v
 
@@ -70,8 +66,8 @@ var = (varPref <>) . T.pack . show
 renderDef :: Var -> Value -> Text
 renderDef name val = "var " <> name <> " = " <> val <> ";"
 
-compile :: [Template] -> (Text, Text)
-compile tmpl = (foldMap (uncurry renderDef) defs, wrapFn func)
+compileAll :: [Template] -> (Text, Text)
+compileAll tmpl = (foldMap (uncurry renderDef) defs, wrapFn func)
   where Fn fn = compileFn tmpl
         (defs, func) = St.evalState (Wr.execWriterT fn) 0
 
@@ -110,9 +106,5 @@ compileIf cases = do
 wrapAMD :: (Text, Text) -> Text
 wrapAMD (defs, fn) = "define(['escapeHTML'], function (e) {" <> defs <> "return " <> fn <> "; });"
 
-main :: IO ()
-main = do
-  [file] <- getArgs
-  str <- T.readFile file
-  let tmpl = parse (scan str)
-  T.putStr (wrapAMD $ compile tmpl)
+compile :: [Template] -> Text
+compile parts = wrapAMD (compileAll parts)

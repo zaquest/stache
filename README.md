@@ -48,6 +48,16 @@ Note:
 
 ## Usage
 
-````
-stachec path/to/template > template.js
 ```
+stachejs path/to/template > template.js
+stachephp path/to/template > template.php
+```
+
+## JavaScript
+
+JavaScript version has a small runtime dependency in `js/` directory.
+
+## PHP
+
+PHP version generates code for associative arrays. Objects are not
+supported.
