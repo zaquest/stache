@@ -1,49 +1,54 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Text.Stache.Php (compile) where
+module Text.Stache.Php where
 
-import Data.Monoid
-import Data.Foldable (foldl1)
+import Data.Semigroup ((<>))
 import Data.Text (Text)
 import qualified Data.Text as T
-import Control.Monad.State.Strict (State)
-import qualified Control.Monad.State.Strict as St
-import Control.Monad.Writer.Strict (WriterT)
+import Data.Foldable (foldl1, traverse_)
+import Control.Monad.Writer.Strict (Writer)
 import qualified Control.Monad.Writer.Strict as Wr
-import Control.Monad.Trans (lift)
-import Data.Sequence (Seq, ViewL(..), (<|), (|>))
-import qualified Data.Sequence as Seq
 import Text.Stache.Types
-import Text.Stache.Scan (scan)
-import Text.Stache.Parse (parse, Template(..))
 
-type Var = Text -- variable name
-type Value = Text -- RHS of an assignment
-type Chunk = Text
-type Def = (Var, Text) -- partials
+varPref :: Text
+varPref = "$p"
 
-newtype Fn a = Fn { unFn :: WriterT (Seq Def, Seq Chunk) (State Int) a }
-  deriving (Functor, Applicative, Monad)
+var :: Int -> Text
+var = (varPref <>) . T.pack . show
 
-define :: Fn () -> Fn Var
-define val = Fn $ do
-  (defs, fn) <- unFn $ finishFn val
-  n <- St.state $ \n -> (n, n+1)
-  let v = var n
-  Wr.tell (defs |> (v, fn), mempty)
-  pure v
+type Code = Text
 
-tell :: Chunk -> Fn ()
-tell chunk = Fn $ Wr.tell (mempty, Seq.singleton chunk)
+genCode :: Template Id -> (Id, Code)
+genCode = Wr.runWriter . genCodeT
 
-finishFn :: Fn a -> Fn (Seq Def, Text)
-finishFn (Fn fn) = Fn . lift $ (\(defs, chunks) -> (defs, renderFn (fmap fst defs) chunks)) <$> Wr.execWriterT fn
+type CodeGen a = Writer Code a
+
+genCodeT :: Template Id -> CodeGen Id
+genCodeT (T id xs) = do
+  mapM_ (traverse_ genCodeT) xs
+  Wr.tell $ renderFn id (getDeps xs) str
+  pure id
+    where cs = map genCodeB xs
+          str = join " . " cs
+          getDeps = foldMap (foldMap (pure . label))
+
+genCodeB :: Base (Template Id) -> Code
+genCodeB (Raw p) = joinPath p
+genCodeB (Escape p) = "htmlspecialchars(" <> joinPath p <> ")"
+genCodeB (Lit lit) = phpString lit
+genCodeB (If cs) = compileIf (map (fmap label) cs) "''"
+genCodeB (IfElse cs t) = compileIf (map (fmap label) cs) (call (label t))
+genCodeB (Each p t) = "join('', array_map(" <> (var (label t)) <> ", " <> joinPath p <> "))"
+
+compileIf :: [(Path, Id)] -> Code -> Code
+compileIf cases elseCase = build (map (fmap call) cases)
+  where build [] = elseCase
+        build ((pred, ifCase) : xs) = "(" <> joinPath pred <> " ? " <> ifCase <> " : " <> build xs <> ")"
+
+call :: Id -> Code
+call fn = var fn <> "(" <> root <> ")"
 
 root :: Text
 root = "$d"
-
-join :: (Monoid a, Foldable t) => a -> t a -> a
-join sep = foldl1 (\l r -> l <> sep <> r)
 
 joinPath :: Path -> Text
 joinPath path = root <> "['" <> join "']['" path <> "']"
@@ -58,58 +63,16 @@ escape s = case T.uncons t of
 phpString :: Text -> Text
 phpString s = "'" <> escape s <> "'"
 
-varPref :: Text
-varPref = "$p"
-
-var :: Int -> Text
-var = (varPref <>) . T.pack . show
-
-renderDef :: Var -> Value -> Text
-renderDef name val = name <> " = " <> val <> ";\n"
-
-compileAll :: [Template] -> (Text, Text)
-compileAll tmpl = (foldMap (uncurry renderDef) defs, renderFn (fmap fst defs) func)
-  where Fn fn = compileFn tmpl
-        (defs, func) = St.evalState (Wr.execWriterT fn) 0
-
-compileFn :: [Template] -> Fn ()
-compileFn = mapM_ compileChunk
-
-renderFn :: Seq Var -> Seq Chunk -> Text
-renderFn vars chunks =
+renderFn :: Id -> [Id] -> Code -> Code
+renderFn id vars chunks = var id <> " = " <>
   "function (" <> root <> ") " <> use <> " {\n"
-  <> "return "
-  <> join " . " chunks <> ";\n}"
+  <> "return " <> chunks <> ";\n};"
     where
-      use | Seq.null vars = ""
-          | otherwise = "use (" <> join ", " vars <> ")"
+      use | null vars = ""
+          | otherwise = "use (" <> join ", " (map var vars) <> ")"
 
-compileChunk :: Template -> Fn ()
-compileChunk (Raw path) = tell (joinPath path)
-compileChunk (Lit str) = tell (phpString str)
-compileChunk (Escape path) = tell ("htmlspecialchars(" <> joinPath path <> ")")
-compileChunk (Each path sub) = do
-  var <- define (compileFn sub)
-  tell ("join('', array_map(" <> var <> ", " <> joinPath path <> "))")
-compileChunk (If cases) = do
-  ifs <- compileIf cases "''"
-  tell ifs
-compileChunk (IfElse cases elseCase) = do
-  var <- define (compileFn elseCase)
-  ifs <- compileIf cases (var <> "(" <> root <> ")")
-  tell ifs
+wrapModule :: (Id, Code) -> Code
+wrapModule (id, code) = "<?php return (function () {\n" <> code <> "return " <> var id <> ";\n})();\n"
 
-compileIf :: [(Path, [Template])] -> Chunk -> Fn Chunk
-compileIf cases elseCase = do
-  calls <- map call <$>  mapM (define . compileFn) subs
-  pure (build (zip paths calls))
-  where (paths, subs) = unzip cases
-        build [] = elseCase
-        build ((pred, ifCase) : xs) = "(" <> joinPath pred <> " ? " <> ifCase <> " : " <> build xs <> ")"
-        call fn = fn <> "(" <> root <> ")"
-
-wrapModule :: (Text, Text) -> Text
-wrapModule (defs, fn) = "<?php return (function () {\n" <> defs <> "return " <> fn <> ";\n})();\n"
-
-compile :: [Template] -> Text
-compile tmpl = wrapModule (compileAll tmpl)
+compile :: Template () -> Text
+compile = wrapModule . genCode . name

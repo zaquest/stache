@@ -1,5 +1,5 @@
 name:                stache
-version:             0.2.0.0
+version:             0.2.0.1
 synopsis:            Compile basic templates to JS AMD modules.
 -- description:
 homepage:            https://github.com/zaquest/stache#readme
@@ -8,7 +8,7 @@ license-file:        LICENSE
 author:              zaquest
 maintainer:          web.elektro.net@gmail.com
 copyright:           2017 zaquest
-category:            Web, Template, JavaScript
+category:            Web, Template, JavaScript, PHP
 build-type:          Simple
 cabal-version:       >=1.10
 extra-source-files:  README.md
@@ -27,6 +27,7 @@ library
                       ,utf8-string
                       ,containers
                       ,mtl
+                      ,data-fix
 
 executable stachejs
   hs-source-dirs:      stachec

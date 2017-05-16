@@ -1,61 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Text.Stache.JavaScript (compile) where
 
-import Data.Monoid
 import Data.Char (isControl)
-import Data.Foldable (foldl1)
+import Data.Semigroup ((<>))
 import Data.Text (Text)
 import qualified Data.Text as T
-import Control.Monad.State.Strict (State)
-import qualified Control.Monad.State.Strict as St
-import Control.Monad.Writer.Strict (WriterT)
+import Data.Foldable (foldl1, traverse_)
+import Control.Monad.Writer.Strict (Writer)
 import qualified Control.Monad.Writer.Strict as Wr
-import Control.Monad.Trans (lift)
-import Data.Sequence (Seq, ViewL(..), (<|), (|>))
-import qualified Data.Sequence as Seq
 import Text.Stache.Types
-import Text.Stache.Scan (scan)
-import Text.Stache.Parse (Template(..))
-
-type Var = Text -- variable name
-type Value = Text -- RHS of an assignment
-type Chunk = Text
-type Def = (Var, Text) -- partials
-
-newtype Fn a = Fn { unFn :: WriterT (Seq Def, Seq Chunk) (State Int) a }
-  deriving (Functor, Applicative, Monad)
-
-define :: Fn () -> Fn Var
-define val = Fn $ do
-  (defs, fn) <- unFn $ finishFn val
-  n <- St.state $ \n -> (n, n+1)
-  let v = var n
-  Wr.tell (defs |> (v, fn), mempty)
-  pure v
-
-tell :: Chunk -> Fn ()
-tell chunk = Fn $ Wr.tell (mempty, Seq.singleton chunk)
-
-root :: Text
-root = "d"
-
-join :: (Monoid a, Foldable t) => a -> t a -> a
-join sep = foldl1 (\l r -> l <> sep <> r)
-
-joinP :: Path -> Text
-joinP = join "." . (root :)
-
-escape :: Text -> Text
-escape s = case T.uncons t of
-             Nothing -> h
-             Just (c, t') -> h <> escapeChar c <> escape t'
-  where (h, t) = T.break (\c -> c == '"' || isControl c) s
-        escapeChar '"' = "\\\""
-        escapeChar c = T.pack . take 2 . drop 1 $ show c -- hax
-
-jsString :: Text -> Text
-jsString s = "\"" <> escape s <> "\""
 
 varPref :: Text
 varPref = "p"
@@ -63,48 +16,67 @@ varPref = "p"
 var :: Int -> Text
 var = (varPref <>) . T.pack . show
 
-renderDef :: Var -> Value -> Text
-renderDef name val = "var " <> name <> " = " <> val <> ";"
+type Code = Text
 
-compileAll :: [Template] -> (Text, Text)
-compileAll tmpl = (foldMap (uncurry renderDef) defs, wrapFn func)
-  where Fn fn = compileFn tmpl
-        (defs, func) = St.evalState (Wr.execWriterT fn) 0
+genCode :: Template Id -> (Id, Code)
+genCode = Wr.runWriter . genCodeT
 
-finishFn :: Fn a -> Fn (Seq Def, Text)
-finishFn (Fn fn) = Fn . lift $ fmap wrapFn <$> Wr.execWriterT fn
+type CodeGen a = Writer Code a
 
-wrapFn :: Seq Chunk -> Text
-wrapFn chunks = "function (" <> root <> ") {" <> "return "
-                <> join " + " chunks <> ";}"
+genCodeT :: Template Id -> CodeGen Id
+genCodeT (T id xs) = do
+  mapM_ (traverse_ genCodeT) xs
+  Wr.tell $ renderFn id (getDeps xs) str
+  pure id
+    where cs = map genCodeB xs
+          str = join " + " cs
+          getDeps = foldMap (foldMap (pure . label))
 
-compileFn :: [Template] -> Fn ()
-compileFn = mapM_ compileChunk
+genCodeB :: Base (Template Id) -> Code
+genCodeB (Raw p) = joinPath p
+genCodeB (Escape p) = "e(" <> joinPath p <> ")"
+genCodeB (Lit lit) = jsString lit
+genCodeB (If cs) = compileIf (map (fmap label) cs) "''"
+genCodeB (IfElse cs t) = compileIf (map (fmap label) cs) (call (label t))
+genCodeB (Each p t) = joinPath p <> ".map(" <> var (label t) <> ").join('')"
 
-compileChunk :: Template -> Fn ()
-compileChunk (Raw path) = tell (joinP path)
-compileChunk (Lit str) = tell (jsString str)
-compileChunk (Escape path) = tell ("e(" <> joinP path <> ")")
-compileChunk (Each path sub) = do
-  var <- define (compileFn sub)
-  tell (joinP path <> ".map(" <> var <> ").join('')")
-compileChunk (If cases) = do
-  ifs <- compileIf cases
-  tell ("(" <> ifs <> " : '')")
-compileChunk (IfElse cases elseCase) = do
-  ifs <- compileIf cases
-  var <- define (compileFn elseCase)
-  tell ("(" <> ifs <> " : " <> var <> "(" <> root <> "))")
+compileIf :: [(Path, Id)] -> Code -> Code
+compileIf cases elseCase = build (map (fmap call) cases)
+  where build [] = elseCase
+        build ((pred, ifCase) : xs) = "(" <> joinPath pred <> " ? " <> ifCase <> " : " <> build xs <> ")"
+-- compileIf :: [(Path, [Template])] -> Fn Chunk
+-- compileIf cases = do
+--   calls <- map call <$>  mapM (define . compileFn) subs
+--   pure (join " : " (zipWith (\p c -> joinP p <> " ? " <> c) paths calls))
+--   where (paths, subs) = unzip cases
+--         call fn = fn <> "(" <> root <> ")"
 
-compileIf :: [(Path, [Template])] -> Fn Chunk
-compileIf cases = do
-  calls <- map call <$>  mapM (define . compileFn) subs
-  pure (join " : " (zipWith (\p c -> joinP p <> " ? " <> c) paths calls))
-  where (paths, subs) = unzip cases
-        call fn = fn <> "(" <> root <> ")"
+call :: Id -> Code
+call fn = var fn <> "(" <> root <> ")"
 
-wrapAMD :: (Text, Text) -> Text
-wrapAMD (defs, fn) = "define(['escapeHTML'], function (e) {" <> defs <> "return " <> fn <> "; });"
+root :: Text
+root = "d"
 
-compile :: [Template] -> Text
-compile parts = wrapAMD (compileAll parts)
+joinPath :: Path -> Text
+joinPath = join "." . (root :)
+
+escape :: Text -> Text
+escape s = case T.uncons t of
+             Nothing -> h
+             Just (c, t') -> h <> escapeChar c <> escape t'
+  where (h, t) = T.break (\c -> c == '\'' || isControl c) s
+        escapeChar '\'' = "\\\'"
+        escapeChar c = T.pack . take 2 . drop 1 $ show c -- hax
+
+jsString :: Text -> Text
+jsString s = "'" <> escape s <> "'"
+
+renderFn :: Id -> [Id] -> Code -> Code
+renderFn id _ chunks = "var " <> var id <> " = " <>
+  "function (" <> root <> ") {\nreturn " <> chunks <> ";\n};"
+
+wrapModule :: (Id, Code) -> Code
+wrapModule (id, code) = "define(['escapeHTML'], function (e) {" <> code <> "return " <> var id <> "; });"
+
+compile :: Template () -> Text
+compile = wrapModule . genCode . name
