@@ -15,7 +15,7 @@ extra-source-files:  README.md
 
 library
   hs-source-dirs:      src
-  exposed-modules:     Text.Stache.Types
+  exposed-modules:     Text.Stache.Compile
                       ,Text.Stache.Scan
                       ,Text.Stache.Parse
                       ,Text.Stache.JavaScript
@@ -25,24 +25,12 @@ library
                       ,array
                       ,text
                       ,utf8-string
-                      ,containers
                       ,mtl
-                      ,data-fix
 
-executable stachejs
-  hs-source-dirs:      stachec
+executable stachec
+  hs-source-dirs:      app
   main-is:             Stache.hs
   default-language:    Haskell2010
-  cpp-options:         -DJS
-  build-depends:       base >= 4.7 && < 5
-                      ,text
-                      ,stache
-
-executable stachephp
-  hs-source-dirs:      stachec
-  main-is:             Stache.hs
-  default-language:    Haskell2010
-  cpp-options:         -DPHP
   build-depends:       base >= 4.7 && < 5
                       ,text
                       ,stache

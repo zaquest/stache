@@ -2,3 +2,5 @@
 *.swp
 *.o
 *.hi
+test/test.js
+test/test.php

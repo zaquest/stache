@@ -1,0 +1,25 @@
+<article id=idt{{{id}}} class=tor>
+    <a class='tor-cover-wrap tor-cover'
+       href='{{{url}}}'
+       title='{{nm}}'
+       style='background-image: url({{{img}}});'> </a>
+    <h3 class=tor-title><a href="{{{url}}}">{{nm}}</a></h3>
+    <small class=tor-stats>{{{sz}}}, {{{ad}}},
+      <span class=up>⇑{{{u}}}</span>
+      <span class=down>⇓{{{d}}}</span>
+    </small>
+    <p class=tor-desc>
+        {{od}}
+        <a class=tor-more href="{{{url}}}">читать далее... </a>
+    </p>
+    {{#each list}}
+        <h1>{{{title}}}</h1>
+        {{#if test}}
+            hello {{title}}
+        {{#elif test2}}
+            {{title}} there
+        {{#else}}
+            dumb {{title}}
+        {{/if}}
+    {{/each}}
+</article>

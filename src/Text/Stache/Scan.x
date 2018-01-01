@@ -4,7 +4,7 @@ module Text.Stache.Scan (scan, Token(..), Path) where
 import Data.Word (Word8)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Text.Stache.Types
+import Text.Stache.Compile
 import Codec.Binary.UTF8.String (encodeChar)
 }
 
