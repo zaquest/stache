@@ -28,8 +28,8 @@ jsLit :: Literal -> Text -- string -> literal string
 jsLit s = "'" <> escape s <> "'"
 
 jsIf :: [(Text, [Text])] -> [Text] -> Text -- [(encoded path, [case body chunk])] -> [else body chunk] -> code
-jsIf [] ecs = "(" <> join " + " ecs <> ")"
-jsIf ((p, cs) : css) ecs = "(" <> p <> " ? (" <> join " + " cs <> ") : " <> jsIf css ecs <> ")"
+jsIf [] ecs = "(" <> join "+" ecs <> ")"
+jsIf ((p, cs) : css) ecs = "(" <> p <> "?(" <> join "+" cs <> "):" <> jsIf css ecs <> ")"
 
 jsEach :: Text -> Proto -> Text -- encoded path -> function name -> code
 jsEach path proto = path <> ".map(" <> name proto <> ").join('')"
@@ -39,10 +39,10 @@ jsVar n = "p" <> (T.pack $ show n)
 
 jsFunction :: Proto -> [Fn] -> [Text] -> Text -- proto -> [fn deps] -> [body chunk] -> code
 jsFunction proto _ chunks = "var " <> name proto <> " = " <>
-  "function (" <> arg proto <> ") {return " <> join " + " chunks <> ";};"
+  "function(" <> arg proto <> "){return " <> join "+" chunks <> ";};"
 
 jsModule :: Proto -> Text -> Text -- entry point -> body -> code
-jsModule proto code = "define(['escapeHTML'], function (e) {" <> code <> "return " <> name proto <> "; });"
+jsModule proto code = "define(['escapeHTML'],function(e){" <> code <> "return " <> name proto <> ";});"
 
 jsCodeGen :: CodeGen
 jsCodeGen = CodeGen
