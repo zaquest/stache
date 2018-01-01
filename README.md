@@ -49,8 +49,8 @@ Note:
 ## Usage
 
 ```
-stachejs path/to/template > template.js
-stachephp path/to/template > template.php
+stachec js path/to/template > template.js
+stachec php path/to/template > template.php
 ```
 
 ## JavaScript
